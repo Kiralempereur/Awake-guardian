@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Awake Guardian</title>
+    
+    <!-- Tailwind CSS pour un design moderne et sombre -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Librairies MediaPipe de Google pour la détection du visage en temps réel -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js" crossorigin="anonymous"></script>
+
+    <!-- Icônes Lucide -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+
+    <style>
+        /* Animations fluides pour l'interface */
+        .transition-all { transition-property: all; transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1); transition-duration: 300ms; }
+        .pulsate-bg { animation: pulsate-red 1s infinite alternate; }
+        
+        /* Flash stroboscopique d'urgence */
+        .flash-active { animation: strobe 0.1s infinite; }
+        
+        @keyframes pulsate-red {
+            0% { background-color: rgb(127, 29, 29); } /* bg-red-900 */
+            100% { background-color: rgb(220, 38, 38); } /* bg-red-600 */
+        }
+        
+        @keyframes strobe {
+            0%, 100% { background-color: #030712; color: white; } /* bg-gray-950 */
+            50% { background-color: #ffffff; color: black; }
+        }
+    </style>
+</head>
+<body class="bg-gray-950 text-gray-100 font-sans min-h-screen flex flex-col transition-colors duration-500" id="main-body">
+
+    <!-- En-tête -->
+    <header class="bg-gray-900 border-b border-gray-800 p-4 shadow-md z-50 relative">
+        <div class="max-w-6xl mx-auto flex justify-between items-center">
+            <div class="flex items-center gap-3">
+                <i data-lucide="eye" class="text-blue-500 w-8 h-8"></i>
+                <h1 class="text-2xl font-bold tracking-tight">Awake <span class="text-blue-500">Guardian</span></h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="hidden sm:flex items-center gap-2 text-sm text-green-400 bg-green-400/10 px-3 py-1.5 rounded-full border border-green-400/20">
+                    <i data-lucide="shield-check" class="w-4 h-4"></i>
+                    <span>100% Local & Privé</span>
+                </div>
+                <button id="fullscreen-btn" class="p-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors" title="Mode Plein Écran">
+                    <i data-lucide="maximize" class="w-5 h-5"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Contenu Principal -->
+    <main class="flex-grow p-4 md:p-8 max-w-6xl mx-auto w-full grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+        
+        <!-- Panneau de Gauche : Caméra et Visuel -->
+        <div class="bg-gray-900 rounded-2xl p-4 border border-gray-800 shadow-xl relative overflow-hidden flex flex-col">
+            <h2 class="text-lg font-semibold mb-4 flex items-center gap-2">
+                <i data-lucide="camera" class="w-5 h-5 text-gray-400"></i>
+                Retour Caméra
+            </h2>
+            
+            <div class="relative w-full aspect-video bg-gray-950 rounded-xl overflow-hidden border border-gray-800 flex justify-center items-center">
+                <!-- Message avant démarrage -->
+                <div id="startup-message" class="absolute z-10 flex flex-col items-center text-center p-6">
+                    <i data-lucide="power" class="w-12 h-12 text-gray-600 mb-3"></i>
+                    <p class="text-gray-400 mb-4">La caméra est désactivée.</p>
+                    <button id="start-btn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-lg transition-all transform hover:scale-105 shadow-[0_0_15px_rgba(37,99,235,0.5)]">
+                        Démarrer le système
+                    </button>
+                </div>
+
+                <!-- Loader pendant le chargement de l'IA -->
+                <div id="loading-indicator" class="hidden absolute z-10 flex flex-col items-center">
+                    <i data-lucide="loader-2" class="w-10 h-10 text-blue-500 animate-spin mb-2"></i>
+                    <p class="text-blue-400 font-medium animate-pulse">Chargement de l'IA visuelle...</p>
+                </div>
+
+                <!-- Éléments vidéo invisibles (utilisés pour les calculs) et Canvas (pour l'affichage) -->
+                <video id="input-video" class="hidden" playsinline></video>
+                <canvas id="output-canvas" class="w-full h-full object-cover hidden"></canvas>
+            </div>
+            
+            <p class="text-xs text-gray-500 mt-4 text-center">
+                Le système trace des points verts autour de tes yeux et de ta bouche pour analyser ton état.
+            </p>
+        </div>
+
+        <!-- Panneau de Droite : Contrôles et État -->
+        <div class="flex flex-col gap-6">
+            
+            <!-- Carte d'état actuel -->
+            <div id="status-card" class="bg-gray-900 rounded-2xl p-6 border border-gray-800 shadow-xl transition-all">
+                <h2 class="text-gray-400 text-sm font-semibold uppercase tracking-wider mb-2">Statut en direct</h2>
+                <div class="flex items-center gap-4">
+                    <div id="status-icon-container" class="w-16 h-16 rounded-full bg-gray-800 flex items-center justify-center transition-colors">
+                        <i id="status-icon" data-lucide="minus" class="w-8 h-8 text-gray-500"></i>
+                    </div>
+                    <div>
+                        <div id="status-title" class="text-3xl font-bold text-gray-500">En attente</div>
+                        <div id="status-subtitle" class="text-sm text-gray-400 mt-1">Démarre le système pour commencer.</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- NOUVEAU : Carte Statistiques et Options Avancées -->
+            <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800 shadow-xl flex flex-col gap-4">
+                <div class="flex justify-between items-center pb-4 border-b border-gray-800">
+                    <div class="flex items-center gap-2">
+                        <i data-lucide="activity" class="w-5 h-5 text-blue-400"></i>
+                        <span class="font-semibold text-gray-200">Micro-sommeils détectés</span>
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <span id="microsleep-counter" class="text-2xl font-bold text-red-400">0</span>
+                        <button id="reset-stats-btn" class="text-xs bg-gray-800 hover:bg-gray-700 text-gray-400 px-2 py-1 rounded transition-colors">Réinitialiser</button>
+                    </div>
+                </div>
+
+                <div class="space-y-3 pt-2">
+                    <label class="flex items-center justify-between cursor-pointer group">
+                        <div class="flex flex-col">
+                            <span class="text-sm font-medium text-gray-200 group-hover:text-white transition-colors">Avertisseur de bâillements</span>
+                            <span class="text-xs text-gray-500">Bip doux préventif si tu bâilles</span>
+                        </div>
+                        <div class="relative">
+                            <input type="checkbox" id="toggle-yawn" class="sr-only peer" checked>
+                            <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-500"></div>
+                        </div>
+                    </label>
+
+                    <label class="flex items-center justify-between cursor-pointer group">
+                        <div class="flex flex-col">
+                            <span class="text-sm font-medium text-gray-200 group-hover:text-white transition-colors">Flash d'urgence (Stroboscope)</span>
+                            <span class="text-xs text-gray-500">Fait clignoter l'écran avec l'alarme</span>
+                        </div>
+                        <div class="relative">
+                            <input type="checkbox" id="toggle-flash" class="sr-only peer">
+                            <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-red-500"></div>
+                        </div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Carte de Calibrage et Réglages -->
+            <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800 shadow-xl">
+                <h2 class="text-lg font-semibold mb-6 flex items-center gap-2">
+                    <i data-lucide="sliders" class="w-5 h-5 text-gray-400"></i>
+                    Calibrage et Réglages
+                </h2>
+
+                <!-- Jauge d'ouverture des yeux -->
+                <div class="mb-8">
+                    <div class="flex justify-between text-sm mb-2">
+                        <span class="text-gray-400">Ouverture des yeux (Temps réel)</span>
+                        <span id="ear-value-display" class="font-mono font-bold text-blue-400">0.00</span>
+                    </div>
+                    <div class="w-full h-4 bg-gray-950 rounded-full overflow-hidden relative border border-gray-800">
+                        <div id="ear-bar" class="h-full bg-blue-500 w-0 transition-all duration-100 ease-linear"></div>
+                        <!-- Ligne de seuil -->
+                        <div id="threshold-marker" class="absolute top-0 bottom-0 w-1 bg-red-500 z-10" style="left: 22%;"></div>
+                    </div>
+                    <p class="text-xs text-gray-500 mt-2">
+                        Si la barre bleue passe en dessous de la ligne rouge, le chronomètre démarre.
+                    </p>
+                </div>
+
+                <!-- Sliders -->
+                <div class="space-y-6">
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-sm font-medium text-gray-300">Sensibilité (Seuil de fermeture)</label>
+                            <span id="threshold-display" class="text-sm font-bold text-gray-100">0.22</span>
+                        </div>
+                        <input type="range" id="threshold-slider" min="0.10" max="0.35" step="0.01" value="0.22" class="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-1">
+                            <label class="text-sm font-medium text-gray-300">Délai de déclenchement (Secondes)</label>
+                            <span id="delay-display" class="text-sm font-bold text-gray-100">2.0 s</span>
+                        </div>
+                        <input type="range" id="delay-slider" min="0.5" max="5.0" step="0.5" value="2.0" class="w-full h-2 bg-gray-800 rounded-lg appearance-none cursor-pointer accent-blue-500">
+                    </div>
+
+                    <div class="pt-4 border-t border-gray-800">
+                        <label class="text-sm font-medium text-gray-300 block mb-2">Son d'alarme personnalisé (Optionnel)</label>
+                        
+                        <!-- Zone pour choisir le fichier -->
+                        <div id="upload-container">
+                            <input type="file" id="audio-upload" accept="audio/mp3, audio/wav, audio/mpeg" class="block w-full text-sm text-gray-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-500/10 file:text-blue-400 hover:file:bg-blue-500/20 transition-colors cursor-pointer">
+                            <p class="text-xs text-gray-500 mt-2">Choisis un fichier MP3 sur ton ordinateur. S'il n'y a pas de fichier, l'alarme stridente par défaut sera utilisée.</p>
+                        </div>
+
+                        <!-- Fichier actif (caché tant qu'aucun fichier n'est choisi) -->
+                        <div id="active-file-container" class="hidden items-center justify-between bg-blue-900/20 border border-blue-500/30 p-3 rounded-lg mt-2 transition-all">
+                            <div class="flex items-center gap-3 overflow-hidden">
+                                <div class="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center flex-shrink-0">
+                                    <i data-lucide="music" class="w-4 h-4 text-blue-400"></i>
+                                </div>
+                                <div class="flex flex-col min-w-0">
+                                    <span class="text-xs text-gray-400 uppercase tracking-wider">Son activé</span>
+                                    <span id="active-file-name" class="text-sm text-blue-300 truncate font-medium">...</span>
+                                </div>
+                            </div>
+                            <button id="remove-audio-btn" class="text-red-400 hover:text-red-300 hover:bg-red-400/20 p-2 rounded-lg transition-colors flex-shrink-0" title="Retirer ce son">
+                                <i data-lucide="trash-2" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                        
+                        <audio id="custom-audio-player" class="hidden"></audio>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800 shadow-xl flex gap-4">
+                <button id="test-sound-btn" class="flex-1 bg-gray-800 hover:bg-gray-700 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2">
+                    <i data-lucide="volume-2" class="w-5 h-5"></i>
+                    Tester l'alarme
+                </button>
+                <button id="stop-btn" class="flex-1 bg-red-900/50 hover:bg-red-800 text-red-200 font-medium py-3 px-4 rounded-lg transition-colors hidden items-center justify-center gap-2 border border-red-900">
+                    <i data-lucide="square" class="w-5 h-5 fill-current"></i>
+                    Arrêter
+                </button>
+            </div>
+
+        </div>
+    </main>
+
+    <script>
+        // Initialisation des icônes
+        lucide.createIcons();
+
+        // --- ELEMENTS DU DOM ---
+        const videoElement = document.getElementById('input-video');
+        const canvasElement = document.getElementById('output-canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        
+        const startBtn = document.getElementById('start-btn');
+        const stopBtn = document.getElementById('stop-btn');
+        const testSoundBtn = document.getElementById('test-sound-btn');
+        const fullscreenBtn = document.getElementById('fullscreen-btn');
+        const startupMessage = document.getElementById('startup-message');
+        const loadingIndicator = document.getElementById('loading-indicator');
+        
+        const statusCard = document.getElementById('status-card');
+        const statusIconContainer = document.getElementById('status-icon-container');
+        const statusIcon = document.getElementById('status-icon');
+        const statusTitle = document.getElementById('status-title');
+        const statusSubtitle = document.getElementById('status-subtitle');
+        const mainBody = document.getElementById('main-body');
+
+        const earBar = document.getElementById('ear-bar');
+        const earValueDisplay = document.getElementById('ear-value-display');
+        const thresholdMarker = document.getElementById('threshold-marker');
+        
+        const thresholdSlider = document.getElementById('threshold-slider');
+        const thresholdDisplay = document.getElementById('threshold-display');
+        const delaySlider = document.getElementById('delay-slider');
+        const delayDisplay = document.getElementById('delay-display');
+        
+        const audioUpload = document.getElementById('audio-upload');
+        const customAudioPlayer = document.getElementById('custom-audio-player');
+        const uploadContainer = document.getElementById('upload-container');
+        const activeFileContainer = document.getElementById('active-file-container');
+        const activeFileName = document.getElementById('active-file-name');
+        const removeAudioBtn = document.getElementById('remove-audio-btn');
+
+        const toggleYawn = document.getElementById('toggle-yawn');
+        const toggleFlash = document.getElementById('toggle-flash');
+        const microsleepCounterDisplay = document.getElementById('microsleep-counter');
+        const resetStatsBtn = document.getElementById('reset-stats-btn');
+
+        // --- VARIABLES D'ETAT ---
+        let isSystemRunning = false;
+        let isAlarmPlaying = false;
+        let eyesClosedStartTime = 0;
+        let useCustomAudio = false;
+        let smoothedEAR = 0.5;
+        
+        // Variables pour les bâillements
+        let isYawning = false;
+        let yawnStartTime = 0;
+        
+        // Paramètres (chargés depuis le localStorage si existants)
+        let EAR_THRESHOLD = 0.22;
+        let CLOSED_DELAY_MS = 2000;
+        let ENABLE_YAWN = true;
+        let ENABLE_FLASH = false;
+        let microSleepsCount = 0;
+
+        // --- GESTION DE LA MEMOIRE (localStorage) ---
+        function loadSettings() {
+            try {
+                const saved = localStorage.getItem('awakeGuardianSettings');
+                if (saved) {
+                    const data = JSON.parse(saved);
+                    EAR_THRESHOLD = data.threshold || 0.22;
+                    CLOSED_DELAY_MS = data.delay || 2000;
+                    ENABLE_YAWN = data.yawn !== undefined ? data.yawn : true;
+                    ENABLE_FLASH = data.flash !== undefined ? data.flash : false;
+                    microSleepsCount = data.microSleeps || 0;
+
+                    // Mettre à jour l'interface avec les valeurs sauvegardées
+                    thresholdSlider.value = EAR_THRESHOLD;
+                    thresholdDisplay.textContent = EAR_THRESHOLD.toFixed(2);
+                    delaySlider.value = CLOSED_DELAY_MS / 1000;
+                    delayDisplay.textContent = `${(CLOSED_DELAY_MS / 1000).toFixed(1)} s`;
+                    
+                    toggleYawn.checked = ENABLE_YAWN;
+                    toggleFlash.checked = ENABLE_FLASH;
+                    microsleepCounterDisplay.textContent = microSleepsCount;
+                }
+            } catch (e) { console.error("Erreur de chargement des paramètres", e); }
+        }
+
+        function saveSettings() {
+            try {
+                const data = {
+                    threshold: EAR_THRESHOLD,
+                    delay: CLOSED_DELAY_MS,
+                    yawn: ENABLE_YAWN,
+                    flash: ENABLE_FLASH,
+                    microSleeps: microSleepsCount
+                };
+                localStorage.setItem('awakeGuardianSettings', JSON.stringify(data));
+            } catch (e) { console.error("Erreur de sauvegarde", e); }
+        }
+
+        // --- MOTEUR AUDIO ---
+        let audioCtx = null;
+        let oscillator = null;
+        let gainNode = null;
+        let lfo = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+
+        function playStridentAlarm() {
+            if (isAlarmPlaying) return;
+            initAudio();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+
+            oscillator = audioCtx.createOscillator();
+            gainNode = audioCtx.createGain();
+            lfo = audioCtx.createOscillator();
+            const lfoGain = audioCtx.createGain();
+
+            oscillator.type = 'square';
+            oscillator.frequency.value = 800;
+            lfo.type = 'square';
+            lfo.frequency.value = 5;
+            lfo.connect(lfoGain);
+            lfoGain.gain.value = 400;
+            lfoGain.connect(oscillator.frequency);
+            gainNode.gain.value = 1;
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            lfo.start();
+            oscillator.start();
+            isAlarmPlaying = true;
+        }
+
+        function stopStridentAlarm() {
+            if (!oscillator) return;
+            try {
+                oscillator.stop();
+                lfo.stop();
+                oscillator.disconnect();
+                lfo.disconnect();
+                gainNode.disconnect();
+            } catch (e) {}
+            oscillator = null;
+        }
+
+        // Bip doux pour le bâillement
+        function playYawnWarning() {
+            initAudio();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(440, audioCtx.currentTime); // Note A4
+            osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.3); // Monte vers l'aigu
+            
+            gain.gain.setValueAtTime(0.5, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.5); // Disparaît doucement
+            
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.5);
+        }
+
+        // --- GESTION AUDIO PERSONNALISE ---
+        let currentAudioUrl = null;
+
+        audioUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                if (currentAudioUrl) URL.revokeObjectURL(currentAudioUrl);
+                currentAudioUrl = URL.createObjectURL(file);
+                customAudioPlayer.src = currentAudioUrl;
+                useCustomAudio = true;
+                customAudioPlayer.load();
+                
+                activeFileName.textContent = file.name;
+                uploadContainer.classList.add('hidden');
+                activeFileContainer.classList.remove('hidden');
+                activeFileContainer.classList.add('flex');
+                lucide.createIcons();
+            }
+        });
+
+        removeAudioBtn.addEventListener('click', () => {
+            if (isAlarmPlaying) stopAlarm();
+            if (currentAudioUrl) {
+                URL.revokeObjectURL(currentAudioUrl);
+                currentAudioUrl = null;
+            }
+            audioUpload.value = ''; 
+            customAudioPlayer.src = '';
+            useCustomAudio = false;
+            
+            activeFileContainer.classList.add('hidden');
+            activeFileContainer.classList.remove('flex');
+            uploadContainer.classList.remove('hidden');
+
+            if (isSystemRunning) {
+                eyesClosedStartTime = 0;
+                updateUIState('awake', "Son personnalisé retiré. Système prêt.");
+            }
+        });
+
+        // --- GESTION DU BOUTON TEST & ALARME ---
+        let isTestingAlarm = false;
+
+        function updateTestButtonUI() {
+            if (isTestingAlarm) {
+                testSoundBtn.innerHTML = '<i data-lucide="square" class="w-5 h-5 fill-current"></i> Arrêter le test';
+                testSoundBtn.className = "flex-1 bg-red-900/80 hover:bg-red-800 text-red-100 font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2 border border-red-700 animate-pulse";
+            } else {
+                testSoundBtn.innerHTML = '<i data-lucide="volume-2" class="w-5 h-5"></i> Tester l\'alarme';
+                testSoundBtn.className = "flex-1 bg-gray-800 hover:bg-gray-700 text-white font-medium py-3 px-4 rounded-lg transition-colors flex items-center justify-center gap-2";
+            }
+            lucide.createIcons();
+        }
+
+        function playAlarm() {
+            if (isAlarmPlaying) return;
+            
+            // Activation du Flash si l'option est cochée
+            if (ENABLE_FLASH) {
+                mainBody.classList.add('flash-active');
+            }
+
+            if (useCustomAudio && customAudioPlayer.src) {
+                isAlarmPlaying = true;
+                customAudioPlayer.loop = true;
+                customAudioPlayer.play().catch(e => {
+                    isAlarmPlaying = false;
+                    playStridentAlarm();
+                });
+            } else {
+                playStridentAlarm();
+            }
+        }
+
+        function stopAlarm() {
+            if (!isAlarmPlaying) return;
+            
+            // Couper le Flash
+            mainBody.classList.remove('flash-active');
+
+            if (!customAudioPlayer.paused) {
+                customAudioPlayer.pause();
+                customAudioPlayer.currentTime = 0;
+            }
+            stopStridentAlarm();
+            isAlarmPlaying = false;
+
+            if (isTestingAlarm) {
+                isTestingAlarm = false;
+                updateTestButtonUI();
+            }
+        }
+
+        testSoundBtn.addEventListener('click', () => {
+            if (isAlarmPlaying) stopAlarm();
+            else {
+                isTestingAlarm = true;
+                updateTestButtonUI();
+                playAlarm();
+            }
+        });
+
+        // --- LOGIQUE MATHEMATIQUE (YEUX ET BOUCHE) ---
+        const LEFT_EYE_INDICES = [33, 160, 158, 133, 153, 144];
+        const RIGHT_EYE_INDICES = [362, 385, 387, 263, 373, 380];
+        // Indices pour la bouche (intérieur des lèvres)
+        const MOUTH_INDICES = { top: 13, bottom: 14, left: 78, right: 308 };
+
+        function calculateDistance(point1, point2) {
+            return Math.sqrt(Math.pow(point1.x - point2.x, 2) + Math.pow(point1.y - point2.y, 2));
+        }
+
+        function calculateEAR(landmarks, eyeIndices) {
+            const p1 = landmarks[eyeIndices[0]];
+            const p2 = landmarks[eyeIndices[1]];
+            const p3 = landmarks[eyeIndices[2]];
+            const p4 = landmarks[eyeIndices[3]];
+            const p5 = landmarks[eyeIndices[4]];
+            const p6 = landmarks[eyeIndices[5]];
+
+            const v1 = calculateDistance(p2, p6);
+            const v2 = calculateDistance(p3, p5);
+            const h = calculateDistance(p1, p4);
+            return (v1 + v2) / (2.0 * h);
+        }
+
+        function calculateMAR(landmarks) {
+            // Mouth Aspect Ratio (Ratio d'ouverture de la bouche)
+            const top = landmarks[MOUTH_INDICES.top];
+            const bottom = landmarks[MOUTH_INDICES.bottom];
+            const left = landmarks[MOUTH_INDICES.left];
+            const right = landmarks[MOUTH_INDICES.right];
+            
+            const v = calculateDistance(top, bottom);
+            const h = calculateDistance(left, right);
+            return v / h;
+        }
+
+        // --- MISE A JOUR DE L'INTERFACE ---
+        function updateUIState(state, message) {
+            statusIconContainer.className = "w-16 h-16 rounded-full flex items-center justify-center transition-colors";
+            statusCard.className = "bg-gray-900 rounded-2xl p-6 border shadow-xl transition-all";
+            mainBody.classList.remove('pulsate-bg');
+            
+            if (state === 'awake') {
+                statusIconContainer.classList.add('bg-green-500/20');
+                statusIcon.setAttribute('data-lucide', 'eye');
+                statusIcon.className = "w-8 h-8 text-green-500";
+                statusTitle.textContent = "Éveillé";
+                statusTitle.className = "text-3xl font-bold text-green-400";
+                statusSubtitle.textContent = message || "Tout va bien.";
+                statusCard.classList.add('border-gray-800');
+            } else if (state === 'yawn') {
+                statusIconContainer.classList.add('bg-purple-500/20');
+                statusIcon.setAttribute('data-lucide', 'wind');
+                statusIcon.className = "w-8 h-8 text-purple-500";
+                statusTitle.textContent = "Bâillement";
+                statusTitle.className = "text-3xl font-bold text-purple-400";
+                statusSubtitle.textContent = message;
+                statusCard.classList.add('border-purple-900/50');
+            } else if (state === 'warning') {
+                statusIconContainer.classList.add('bg-yellow-500/20');
+                statusIcon.setAttribute('data-lucide', 'eye-off');
+                statusIcon.className = "w-8 h-8 text-yellow-500";
+                statusTitle.textContent = "Attention";
+                statusTitle.className = "text-3xl font-bold text-yellow-400";
+                statusSubtitle.textContent = message || "Yeux fermés, l'alarme se prépare...";
+                statusCard.classList.add('border-yellow-900/50');
+            } else if (state === 'alarm') {
+                statusIconContainer.classList.add('bg-red-500/20', 'animate-pulse');
+                statusIcon.setAttribute('data-lucide', 'bell-ring');
+                statusIcon.className = "w-8 h-8 text-red-500";
+                statusTitle.textContent = "ALARM !";
+                statusTitle.className = "text-3xl font-bold text-red-500 animate-pulse";
+                statusSubtitle.textContent = message || "RÉVEILLE-TOI ! OUVRE LES YEUX !";
+                statusCard.classList.add('border-red-600', 'bg-red-950/30');
+                if (!ENABLE_FLASH) mainBody.classList.add('pulsate-bg'); // Garde l'effet doux rouge si pas de flash stroboscopique
+            } else if (state === 'noface') {
+                statusIconContainer.classList.add('bg-gray-800');
+                statusIcon.setAttribute('data-lucide', 'scan-face');
+                statusIcon.className = "w-8 h-8 text-gray-500";
+                statusTitle.textContent = "Recherche...";
+                statusTitle.className = "text-3xl font-bold text-gray-500";
+                statusSubtitle.textContent = "Aucun visage détecté.";
+                statusCard.classList.add('border-gray-800');
+            }
+            
+            lucide.createIcons();
+        }
+
+        // --- FONCTION PRINCIPALE DE MEDIAPIPE ---
+        function onResults(results) {
+            if (!isSystemRunning) return;
+
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.translate(canvasElement.width, 0);
+            canvasCtx.scale(-1, 1);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
+                const landmarks = results.multiFaceLandmarks[0];
+
+                // --- DESSIN DES POINTS ---
+                canvasCtx.fillStyle = '#10B981'; // Yeux = Vert
+                [...LEFT_EYE_INDICES, ...RIGHT_EYE_INDICES].forEach(index => {
+                    const point = landmarks[index];
+                    canvasCtx.beginPath();
+                    canvasCtx.arc(point.x * canvasElement.width, point.y * canvasElement.height, 2, 0, 2 * Math.PI);
+                    canvasCtx.fill();
+                });
+
+                if (ENABLE_YAWN) {
+                    canvasCtx.fillStyle = '#A855F7'; // Bouche = Violet
+                    Object.values(MOUTH_INDICES).forEach(index => {
+                        const point = landmarks[index];
+                        canvasCtx.beginPath();
+                        canvasCtx.arc(point.x * canvasElement.width, point.y * canvasElement.height, 2, 0, 2 * Math.PI);
+                        canvasCtx.fill();
+                    });
+                }
+
+                // --- LOGIQUE DES BÂILLEMENTS ---
+                if (ENABLE_YAWN && !isAlarmPlaying && eyesClosedStartTime === 0) {
+                    const mar = calculateMAR(landmarks);
+                    const MAR_THRESHOLD = 0.5; // Seuil de bouche grande ouverte
+                    
+                    if (mar > MAR_THRESHOLD) {
+                        if (yawnStartTime === 0) {
+                            yawnStartTime = Date.now();
+                        } else if (Date.now() - yawnStartTime > 1000 && !isYawning) { // Bâille depuis 1 sec
+                            isYawning = true;
+                            playYawnWarning();
+                            updateUIState('yawn', 'Bâillement détecté ! Fatigue potentielle.');
+                        }
+                    } else {
+                        yawnStartTime = 0;
+                        if (isYawning) {
+                            isYawning = false;
+                            updateUIState('awake', "Système actif, yeux ouverts.");
+                        }
+                    }
+                }
+
+                // --- LOGIQUE DES YEUX (ALARME) ---
+                const leftEAR = calculateEAR(landmarks, LEFT_EYE_INDICES);
+                const rightEAR = calculateEAR(landmarks, RIGHT_EYE_INDICES);
+                const avgEAR = (leftEAR + rightEAR) / 2.0;
+
+                smoothedEAR = (smoothedEAR * 0.8) + (avgEAR * 0.2); // Lissage
+
+                earValueDisplay.textContent = smoothedEAR.toFixed(2);
+                const percent = Math.min(Math.max((smoothedEAR / 0.5) * 100, 0), 100);
+                earBar.style.width = `${percent}%`;
+                
+                if (smoothedEAR < EAR_THRESHOLD) {
+                    earBar.className = "h-full bg-red-500 transition-all duration-75 ease-linear";
+                    
+                    if (eyesClosedStartTime === 0) {
+                        eyesClosedStartTime = Date.now();
+                        updateUIState('warning', `Les yeux se ferment... alarme dans ${(CLOSED_DELAY_MS/1000).toFixed(1)}s`);
+                    } else {
+                        const closedDuration = Date.now() - eyesClosedStartTime;
+                        if (closedDuration >= CLOSED_DELAY_MS && !isAlarmPlaying) {
+                            // DECLENCHEMENT ALARME & MICRO-SOMMEIL
+                            playAlarm();
+                            updateUIState('alarm');
+                            
+                            // On incrémente le compteur de micro-sommeil
+                            if(!isTestingAlarm) {
+                                microSleepsCount++;
+                                microsleepCounterDisplay.textContent = microSleepsCount;
+                                saveSettings();
+                            }
+                        } else if (closedDuration < CLOSED_DELAY_MS && !isAlarmPlaying) {
+                            const remaining = ((CLOSED_DELAY_MS - closedDuration) / 1000).toFixed(1);
+                            updateUIState('warning', `Alarme dans ${remaining}s...`);
+                        }
+                    }
+                } else {
+                    if (eyesClosedStartTime !== 0 || isAlarmPlaying) {
+                        eyesClosedStartTime = 0;
+                        if (isAlarmPlaying && !isTestingAlarm) stopAlarm();
+                        updateUIState('awake', "Système actif, yeux ouverts.");
+                    } else if (statusTitle.textContent !== "Éveillé" && !isYawning) {
+                        updateUIState('awake', "Système actif, yeux ouverts.");
+                    }
+                }
+
+            } else {
+                if (!isAlarmPlaying) {
+                    eyesClosedStartTime = 0;
+                    yawnStartTime = 0;
+                    earValueDisplay.textContent = "0.00";
+                    earBar.style.width = "0%";
+                    updateUIState('noface');
+                }
+            }
+            canvasCtx.restore();
+        }
+
+        // --- INITIALISATION MEDIAPIPE ---
+        const faceMesh = new FaceMesh({locateFile: (file) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+        }});
+        faceMesh.setOptions({
+            maxNumFaces: 1,
+            refineLandmarks: true,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+        faceMesh.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => { if (isSystemRunning) await faceMesh.send({image: videoElement}); },
+            width: 640, height: 480
+        });
+
+        // --- GESTIONNAIRES D'EVENEMENTS UI ---
+        
+        // Sauvegarde automatique lors de la modification des paramètres
+        thresholdSlider.addEventListener('input', (e) => {
+            EAR_THRESHOLD = parseFloat(e.target.value);
+            thresholdDisplay.textContent = EAR_THRESHOLD.toFixed(2);
+            thresholdMarker.style.left = `${(EAR_THRESHOLD / 0.5) * 100}%`;
+            saveSettings();
+        });
+
+        delaySlider.addEventListener('input', (e) => {
+            CLOSED_DELAY_MS = parseFloat(e.target.value) * 1000;
+            delayDisplay.textContent = `${e.target.value} s`;
+            saveSettings();
+        });
+
+        toggleYawn.addEventListener('change', (e) => {
+            ENABLE_YAWN = e.target.checked;
+            saveSettings();
+        });
+
+        toggleFlash.addEventListener('change', (e) => {
+            ENABLE_FLASH = e.target.checked;
+            saveSettings();
+        });
+
+        resetStatsBtn.addEventListener('click', () => {
+            microSleepsCount = 0;
+            microsleepCounterDisplay.textContent = "0";
+            saveSettings();
+        });
+
+        // Bouton Plein Écran
+        let isPseudoFullscreen = false;
+
+        fullscreenBtn.addEventListener('click', () => {
+            if (!document.fullscreenElement && !isPseudoFullscreen) {
+                // Tenter le plein écran natif en priorité
+                if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen().then(() => {
+                        fullscreenBtn.innerHTML = '<i data-lucide="minimize" class="w-5 h-5"></i>';
+                        lucide.createIcons();
+                    }).catch(err => {
+                        console.warn("Plein écran natif bloqué, utilisation du mode étendu :", err);
+                        // Fallback : Plein écran simulé en CSS
+                        document.body.classList.add('fixed', 'inset-0', 'z-[9999]', 'overflow-auto');
+                        isPseudoFullscreen = true;
+                        fullscreenBtn.innerHTML = '<i data-lucide="minimize" class="w-5 h-5"></i>';
+                        lucide.createIcons();
+                    });
+                }
+            } else {
+                // Quitter le plein écran
+                if (document.fullscreenElement) {
+                    document.exitFullscreen().catch(e => console.log(e));
+                }
+                if (isPseudoFullscreen) {
+                    document.body.classList.remove('fixed', 'inset-0', 'z-[9999]', 'overflow-auto');
+                    isPseudoFullscreen = false;
+                }
+                fullscreenBtn.innerHTML = '<i data-lucide="maximize" class="w-5 h-5"></i>';
+                lucide.createIcons();
+            }
+        });
+
+        // Démarrage / Arrêt
+        startBtn.addEventListener('click', () => {
+            initAudio(); 
+            startupMessage.classList.add('hidden');
+            loadingIndicator.classList.remove('hidden');
+            
+            canvasElement.width = 640;
+            canvasElement.height = 480;
+            
+            camera.start().then(() => {
+                isSystemRunning = true;
+                loadingIndicator.classList.add('hidden');
+                canvasElement.classList.remove('hidden');
+                startBtn.parentElement.classList.add('hidden');
+                stopBtn.classList.remove('hidden');
+                statusIconContainer.parentElement.parentElement.classList.remove('opacity-50');
+                updateUIState('noface');
+            }).catch(err => {
+                alert("Erreur: Impossible d'accéder à la caméra. Vérifie les permissions.");
+                startupMessage.classList.remove('hidden');
+                loadingIndicator.classList.add('hidden');
+            });
+        });
+
+        stopBtn.addEventListener('click', () => {
+            isSystemRunning = false;
+            if (isAlarmPlaying) stopAlarm();
+            camera.stop();
+            
+            canvasElement.classList.add('hidden');
+            startupMessage.classList.remove('hidden');
+            stopBtn.classList.add('hidden');
+            
+            updateUIState('noface', "Système arrêté.");
+            statusTitle.textContent = "Arrêté";
+            earValueDisplay.textContent = "0.00";
+            earBar.style.width = "0%";
+            eyesClosedStartTime = 0;
+            isYawning = false;
+        });
+
+        // Au chargement de la page
+        window.addEventListener('DOMContentLoaded', () => {
+            loadSettings(); // Charger la mémoire
+            thresholdMarker.style.left = `${(EAR_THRESHOLD / 0.5) * 100}%`;
+        });
+
+    </script>
+</body>
+</html>
