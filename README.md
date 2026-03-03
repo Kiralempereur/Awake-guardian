@@ -12,7 +12,7 @@ Un système de détection du sommeil en **temps réel** qui utilise votre camér
 
 - **Détection du visage en temps réel** : MediaPipe de Google fait le travail lourd (merci Google)
 - **100% Local & Privé** : Tes données restent sur ton ordi. On regarde même pas ✋
-- **Interface stylée** : Sombre, minimaliste, pour ceux qui ne supportent pas la lumière de Windows 10 à 3h du matin
+- **Interface stylée** : Sombre, minimaliste, pour ceux qui ne supportent pas la lumière du pc à 3h du matin
 - **Analyse intelligente** : Détecte les clignements lents, la bouche qui s'ouvre bizarrement...
 - **Alertes en mode urgence** : Visuelles, sonores, pour te crier dessus si nécessaire
 - **Mode plein écran** : Pour une expérience **immersive** (pas de distractions !)
@@ -31,14 +31,14 @@ Lucide Icons → Des petites images qui font joli
 
 1. Ouvre `index.html` dans ton navigateur (Chrome, Firefox, Edge... pas Internet Explorer, s'il te plaît 🙁)
 2. Clique sur **"Démarrer le système"**
-3. Autorise ta caméra (oui oui, on a besoin de voir ta belle face)
-4. Le système commence à t'épier intelligemment
+3. Autorise ta caméra (oui oui, on a besoin de voir ta belle face entrain de somnoler)
+4. Le système commence à t'épier intelligemment sans quitter ton pc (tu peux te deconnecter si ta pas confiance)
 5. Essaie de t'endormir et regarde ce qui se passe 😄
 
 ## ⚠️ Prérequis (les trucs importants)
 
 - Un navigateur web **moderne** (2020+, on n'est pas au XIXe siècle)
-- Une **caméra** (sinon ça va être difficile de vérifier si tu dors)
+- Une **caméra** (sinon ça va être difficile de vérifier si tu ronfle)
 - Une **bonne lumière** (les yeux en mode silhouette, c'est pas idéal)
 - Un minimum de **respect** pour ton système d'exploitation
 
